@@ -20,7 +20,7 @@ async function tick(options: PreviewBroadcasterOptions): Promise<void> {
 
   inFlight = true
   try {
-    const jpeg = await grabSnapshotJpeg(config, 'sub', 4000)
+    const jpeg = await grabSnapshotJpeg(config, 'sub', 8000)
     options.broadcast({ type: 'preview-frame', jpeg: jpeg.toString('base64') })
   } catch (err) {
     console.error('previewBroadcaster: no se pudo obtener snapshot:', err)

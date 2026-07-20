@@ -20,3 +20,7 @@ nsis:
   uninstallDisplayName: ${productName}
   createDesktopShortcut: always
 npmRebuild: false
+publish:
+  provider: github
+  owner: dogo3991-hash
+  repo: Camara-Bellavista

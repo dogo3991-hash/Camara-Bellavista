@@ -42,14 +42,24 @@ function App(): React.JSX.Element {
   // Refresca la foto sola cada 2s (apenas hay IP/usuario cargados, sin esperar
   // a que se apriete "Probar conexión") — no toca el texto de estado para no
   // parpadear; si un tick falla, se mantiene la última imagen buena.
+  //
+  // inFlightRef evita apilar pedidos: si la cámara tarda más de 2s en responder
+  // (red del sitio más lenta), el intervalo espera a que termine el pedido actual
+  // en vez de sumar una conexión RTSP más — muchas cámaras IP limitan cuántas
+  // sesiones simultáneas aceptan, y apilar pedidos las hace dejar de responder.
   useEffect(() => {
     if (!config.ip || !config.user) return
+    const inFlightRef = { current: false }
     const interval = setInterval(async () => {
+      if (inFlightRef.current) return
+      inFlightRef.current = true
       try {
         const base64 = await window.api.camera.testConnection(configRef.current)
         setSnapshot(`data:image/jpeg;base64,${base64}`)
       } catch {
         // Sin señal momentánea: se reintenta en el próximo tick.
+      } finally {
+        inFlightRef.current = false
       }
     }, 2000)
     return () => clearInterval(interval)

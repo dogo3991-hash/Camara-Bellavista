@@ -64,7 +64,7 @@ function runFfmpeg(args: string[], timeoutMs: number): Promise<Buffer> {
 export async function grabSnapshotJpeg(
   config: CameraConfig,
   stream: StreamKind = 'main',
-  timeoutMs = 8000
+  timeoutMs = 15000
 ): Promise<Buffer> {
   const url = buildRtspUrl(config, stream)
   return runFfmpeg(
@@ -103,7 +103,7 @@ export async function grabRoiRawGray(
   config: CameraConfig,
   roi: RoiFraction,
   targetWidth = 160,
-  timeoutMs = 8000
+  timeoutMs = 15000
 ): Promise<RawGrayFrame> {
   const url = buildRtspUrl(config, 'sub')
   const filter = `${roiFilter(roi)},scale=${targetWidth}:-1,format=gray`
@@ -135,7 +135,7 @@ export async function grabRoiJpeg(
   config: CameraConfig,
   roi: RoiFraction,
   stream: StreamKind = 'main',
-  timeoutMs = 8000
+  timeoutMs = 15000
 ): Promise<Buffer> {
   const url = buildRtspUrl(config, stream)
   return runFfmpeg(

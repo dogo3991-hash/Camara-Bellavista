@@ -5,6 +5,7 @@ import { loadConfig, saveConfig, type CameraConfig } from './camera/config'
 import { grabSnapshotJpeg } from './camera/rtsp'
 import { cameraService, type CameraLogEntry } from './camera/cameraService'
 import { startWsServer, stopWsServer } from './wsServer'
+import { setupAutoUpdater } from './autoUpdate'
 
 function createWindow(): void {
   const mainWindow = new BrowserWindow({
@@ -73,6 +74,7 @@ app.whenReady().then(() => {
 
   registerCameraIpc()
   startWsServer()
+  setupAutoUpdater()
   createWindow()
 
   app.on('activate', function () {
