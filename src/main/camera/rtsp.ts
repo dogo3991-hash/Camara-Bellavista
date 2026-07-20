@@ -32,7 +32,15 @@ function runFfmpeg(args: string[], timeoutMs: number): Promise<Buffer> {
       if (settled) return
       settled = true
       proc.kill('SIGKILL')
-      reject(new Error('Tiempo de espera agotado conectando a la cámara'))
+      // Incluir lo que ffmpeg ya había reportado antes de matarlo — normalmente
+      // ahí está la razón real (rechazo de usuario/contraseña, error de la
+      // cámara, etc.), no solo "se agotó el tiempo".
+      const detail = stderr.trim().slice(-500)
+      reject(
+        new Error(
+          `Tiempo de espera agotado conectando a la cámara${detail ? `. Último mensaje de ffmpeg: ${detail}` : ' (ffmpeg no reportó nada antes de matarlo)'}`
+        )
+      )
     }, timeoutMs)
 
     proc.stdout.on('data', (chunk: Buffer) => chunks.push(chunk))
