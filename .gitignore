@@ -1,0 +1,10 @@
+node_modules
+dist
+out
+.env
+*.log
+.eslintcache
+
+# Tesseract cachea una copia descomprimida en el primer arranque; el .gz es
+# el recurso fuente, esto es solo un cache regenerable.
+resources/tessdata/eng.traineddata
