@@ -1,6 +1,5 @@
 import { WebSocketServer, type WebSocket } from 'ws'
 import { cameraService } from './camera/cameraService'
-import type { PlateReading } from './camera/plateOcr'
 import { startPreviewBroadcast, stopPreviewBroadcast } from './camera/previewBroadcaster'
 
 export const WS_PORT = 4545
@@ -32,15 +31,6 @@ export function startWsServer(): void {
 
   cameraService.on('truck-detected', () => {
     broadcast({ type: 'truck-detected', timestamp: Date.now() })
-  })
-
-  cameraService.on('plate-candidate', (reading: PlateReading) => {
-    broadcast({
-      type: 'plate-candidate',
-      text: reading.text,
-      confidence: reading.confidence,
-      timestamp: Date.now()
-    })
   })
 
   startPreviewBroadcast({

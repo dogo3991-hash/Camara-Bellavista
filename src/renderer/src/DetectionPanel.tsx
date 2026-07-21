@@ -10,7 +10,6 @@ interface Props {
 const COLORS: Record<CameraLogEntry['type'], string> = {
   'truck-detected': '#2563eb',
   settled: '#16a34a',
-  plate: '#f97316',
   frame: '#999',
   error: 'crimson',
   info: '#555'
