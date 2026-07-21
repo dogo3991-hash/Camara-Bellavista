@@ -97,6 +97,7 @@ function App(): React.JSX.Element {
     <div style={{ fontFamily: 'sans-serif', padding: 24, maxWidth: 640 }}>
       <h1>SLM Cámara Romana</h1>
       <p>Configuración de la cámara IP y prueba de conexión.</p>
+      <p style={{ color: '#888', fontSize: 12 }}>Versión {__APP_VERSION__}</p>
 
       <div style={{ display: 'grid', gap: 12, marginTop: 16 }}>
         <label>
