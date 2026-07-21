@@ -7,6 +7,17 @@ import { cameraService, type CameraLogEntry } from './camera/cameraService'
 import { startWsServer, stopWsServer } from './wsServer'
 import { setupAutoUpdater } from './autoUpdate'
 
+// Esta app corre empaquetada sin consola adjunta: si stdout/stderr queda como un pipe
+// roto, cualquier console.log/error revienta el proceso principal con EPIPE (el error
+// "A JavaScript error occurred in the main process" que se ve a veces). Ignorarlo acá
+// evita que un log de rutina tire abajo toda la app.
+process.stdout.on('error', (err: NodeJS.ErrnoException) => {
+  if (err.code !== 'EPIPE') throw err
+})
+process.stderr.on('error', (err: NodeJS.ErrnoException) => {
+  if (err.code !== 'EPIPE') throw err
+})
+
 function createWindow(): void {
   const mainWindow = new BrowserWindow({
     width: 1000,
