@@ -1,6 +1,6 @@
 {
   "name": "slm-camara-romana",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Deteccion de camion por camara IP + reconocimiento de patente para SLM Bellavista",
   "main": "./out/main/index.js",
   "author": "SLM Bellavista",

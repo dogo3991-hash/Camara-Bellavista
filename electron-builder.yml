@@ -11,6 +11,8 @@ files:
 asarUnpack:
   - resources/**
   - node_modules/ffmpeg-static/**
+  - node_modules/tesseract.js/**
+  - node_modules/tesseract.js-core/**
 win:
   executableName: SLM-Camara-Romana
   target: nsis
