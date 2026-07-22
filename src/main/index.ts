@@ -84,7 +84,11 @@ app.whenReady().then(() => {
   })
 
   registerCameraIpc()
-  startWsServer()
+  startWsServer((base64Jpeg) => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      win.webContents.send('camera:preview-frame', base64Jpeg)
+    }
+  })
   setupAutoUpdater()
   createWindow()
 

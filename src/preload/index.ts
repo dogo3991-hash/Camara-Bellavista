@@ -19,6 +19,12 @@ const api = {
         callback(entry)
       ipcRenderer.on('camera:log', listener)
       return () => ipcRenderer.removeListener('camera:log', listener)
+    },
+    onPreviewFrame: (callback: (base64Jpeg: string) => void): (() => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, base64Jpeg: string): void =>
+        callback(base64Jpeg)
+      ipcRenderer.on('camera:preview-frame', listener)
+      return () => ipcRenderer.removeListener('camera:preview-frame', listener)
     }
   }
 }

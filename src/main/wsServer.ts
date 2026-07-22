@@ -16,7 +16,7 @@ function broadcast(payload: Record<string, unknown>): void {
   }
 }
 
-export function startWsServer(): void {
+export function startWsServer(onPreviewFrame?: (base64Jpeg: string) => void): void {
   if (wss) return
 
   wss = new WebSocketServer({ port: WS_PORT })
@@ -34,8 +34,10 @@ export function startWsServer(): void {
   })
 
   startPreviewBroadcast({
-    hasClients: () => (wss?.clients.size ?? 0) > 0,
-    broadcast
+    onFrame: (base64Jpeg) => {
+      broadcast({ type: 'preview-frame', jpeg: base64Jpeg })
+      onPreviewFrame?.(base64Jpeg)
+    }
   })
 }
 

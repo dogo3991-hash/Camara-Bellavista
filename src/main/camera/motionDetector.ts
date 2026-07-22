@@ -1,6 +1,7 @@
 import { EventEmitter } from 'events'
 import type { CameraConfig } from './config'
-import { grabRoiRawGray, type RawGrayFrame } from './rtsp'
+import type { RawGrayFrame } from './rtsp'
+import { startRawGrayStream, type PersistentStreamHandle } from './persistentStream'
 
 export interface MotionDetectorOptions {
   pollIntervalMs?: number
@@ -26,7 +27,7 @@ function meanAbsDiff(a: RawGrayFrame, b: RawGrayFrame): number {
 export class MotionDetector extends EventEmitter {
   private config: CameraConfig
   private readonly opts: Required<MotionDetectorOptions>
-  private timer: NodeJS.Timeout | null = null
+  private stream: PersistentStreamHandle | null = null
   private running = false
   private previousFrame: RawGrayFrame | null = null
   private movingStreak = 0
@@ -58,39 +59,35 @@ export class MotionDetector extends EventEmitter {
     this.movingStreak = 0
     this.stillStreak = 0
     this.state = 'idle'
-    this.scheduleNext(0)
+    // El stream persistente entrega frames al ritmo de este fps en vez de que
+    // nosotros reconectemos por cada uno (ver persistentStream.ts).
+    const fps = Math.max(1, Math.round(1000 / this.opts.pollIntervalMs))
+    this.stream = startRawGrayStream(
+      this.config,
+      this.config.motionRoi,
+      this.opts.frameWidth,
+      fps,
+      (frame) => this.onFrame(frame),
+      (message) => this.emit('error', message)
+    )
   }
 
   stop(): void {
     this.running = false
-    if (this.timer) clearTimeout(this.timer)
-    this.timer = null
+    this.stream?.stop()
+    this.stream = null
   }
 
   isRunning(): boolean {
     return this.running
   }
 
-  private scheduleNext(delay: number): void {
+  private onFrame(frame: RawGrayFrame): void {
     if (!this.running) return
-    this.timer = setTimeout(() => {
-      void this.tick()
-    }, delay)
-  }
-
-  private async tick(): Promise<void> {
-    if (!this.running) return
-    try {
-      const frame = await grabRoiRawGray(this.config, this.config.motionRoi, this.opts.frameWidth)
-      const diff = this.previousFrame ? meanAbsDiff(this.previousFrame, frame) : 0
-      this.previousFrame = frame
-      this.emit('frame', { diff, timestamp: Date.now() })
-      this.evaluate(diff)
-    } catch (err) {
-      this.emit('error', err instanceof Error ? err.message : String(err))
-    } finally {
-      this.scheduleNext(this.opts.pollIntervalMs)
-    }
+    const diff = this.previousFrame ? meanAbsDiff(this.previousFrame, frame) : 0
+    this.previousFrame = frame
+    this.emit('frame', { diff, timestamp: Date.now() })
+    this.evaluate(diff)
   }
 
   private evaluate(diff: number): void {

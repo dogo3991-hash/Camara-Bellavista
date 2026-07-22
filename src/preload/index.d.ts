@@ -12,6 +12,7 @@ export interface CameraApi {
   stopDetection: () => Promise<void>
   detectionStatus: () => Promise<boolean>
   onLog: (callback: (entry: CameraLogEntry) => void) => () => void
+  onPreviewFrame: (callback: (base64Jpeg: string) => void) => () => void
 }
 
 declare global {

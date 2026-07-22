@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { CameraConfig, RoiFraction } from '../../main/camera/config'
 import type { CameraLogEntry } from '../../main/camera/cameraService'
 import { RoiCalibrator } from './RoiCalibrator'
@@ -28,11 +28,6 @@ function App(): React.JSX.Element {
   const [errorMessage, setErrorMessage] = useState<string>('')
   const [detectionRunning, setDetectionRunning] = useState(false)
   const [log, setLog] = useState<CameraLogEntry[]>([])
-  const configRef = useRef(config)
-
-  useEffect(() => {
-    configRef.current = config
-  }, [config])
 
   useEffect(() => {
     window.api.camera.getConfig().then(setConfig)
@@ -43,31 +38,15 @@ function App(): React.JSX.Element {
     return unsubscribe
   }, [])
 
-  // Refresca la foto sola cada 2s (apenas hay IP/usuario cargados, sin esperar
-  // a que se apriete "Probar conexión") — no toca el texto de estado para no
-  // parpadear; si un tick falla, se mantiene la última imagen buena.
-  //
-  // inFlightRef evita apilar pedidos: si la cámara tarda más de 2s en responder
-  // (red del sitio más lenta), el intervalo espera a que termine el pedido actual
-  // en vez de sumar una conexión RTSP más — muchas cámaras IP limitan cuántas
-  // sesiones simultáneas aceptan, y apilar pedidos las hace dejar de responder.
+  // Reusa el mismo stream continuo (persistente, una sola conexión RTSP) que ya
+  // usa la vista previa de Pesos Bellavista — llega empujado por el proceso
+  // principal en vez de pedir una foto suelta cada 2s (evita abrir una tercera
+  // conexión a la cámara solo para esta calibración).
   useEffect(() => {
-    if (!config.ip || !config.user) return
-    const inFlightRef = { current: false }
-    const interval = setInterval(async () => {
-      if (inFlightRef.current) return
-      inFlightRef.current = true
-      try {
-        const base64 = await window.api.camera.testConnection(configRef.current)
-        setSnapshot(`data:image/jpeg;base64,${base64}`)
-      } catch {
-        // Sin señal momentánea: se reintenta en el próximo tick.
-      } finally {
-        inFlightRef.current = false
-      }
-    }, 2000)
-    return () => clearInterval(interval)
-  }, [config.ip, config.user, config.password])
+    return window.api.camera.onPreviewFrame((base64) => {
+      setSnapshot(`data:image/jpeg;base64,${base64}`)
+    })
+  }, [])
 
   async function handleStartDetection(): Promise<void> {
     const trimmed = trimmedConfig(config)
