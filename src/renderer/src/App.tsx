@@ -6,6 +6,10 @@ import { DetectionPanel } from './DetectionPanel'
 
 const MAX_LOG_ENTRIES = 50
 
+function trimmedConfig(c: CameraConfig): CameraConfig {
+  return { ...c, ip: c.ip.trim(), user: c.user.trim(), password: c.password.trim() }
+}
+
 const EMPTY_CONFIG: CameraConfig = {
   ip: '',
   user: '',
@@ -66,8 +70,9 @@ function App(): React.JSX.Element {
   }, [config.ip, config.user, config.password])
 
   async function handleStartDetection(): Promise<void> {
-    await window.api.camera.saveConfig(config)
-    await window.api.camera.startDetection(config)
+    const trimmed = trimmedConfig(config)
+    await window.api.camera.saveConfig(trimmed)
+    await window.api.camera.startDetection(trimmed)
     setDetectionRunning(true)
   }
 
@@ -90,7 +95,7 @@ function App(): React.JSX.Element {
   }
 
   async function handleSave(): Promise<void> {
-    await window.api.camera.saveConfig(config)
+    await window.api.camera.saveConfig(trimmedConfig(config))
   }
 
   return (

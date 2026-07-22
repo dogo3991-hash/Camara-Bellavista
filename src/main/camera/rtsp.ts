@@ -12,9 +12,14 @@ export type StreamKind = 'main' | 'sub'
 
 export function buildRtspUrl(config: CameraConfig, stream: StreamKind): string {
   const subtype = stream === 'main' ? 0 : 1
-  const user = encodeURIComponent(config.user)
-  const password = encodeURIComponent(config.password)
-  return `rtsp://${user}:${password}@${config.ip}:554/cam/realmonitor?channel=1&subtype=${subtype}`
+  // Un espacio invisible de más (típico de copiar/pegar credenciales) arma una URL
+  // levemente inválida: ffmpeg se queda esperando una conexión que nunca resuelve,
+  // sin imprimir ningún error hasta el timeout — de ahí recortar acá, en el único
+  // punto por el que pasan todas las operaciones de cámara.
+  const user = encodeURIComponent(config.user.trim())
+  const password = encodeURIComponent(config.password.trim())
+  const ip = config.ip.trim()
+  return `rtsp://${user}:${password}@${ip}:554/cam/realmonitor?channel=1&subtype=${subtype}`
 }
 
 function runFfmpeg(args: string[], timeoutMs: number): Promise<Buffer> {
