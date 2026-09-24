@@ -11,6 +11,8 @@ export interface CameraApi {
   startDetection: (config: CameraConfig) => Promise<void>
   stopDetection: () => Promise<void>
   detectionStatus: () => Promise<boolean>
+  toggleMini: () => Promise<boolean>
+  miniStatus: () => Promise<boolean>
   onLog: (callback: (entry: CameraLogEntry) => void) => () => void
   onPreviewFrame: (callback: (base64Jpeg: string) => void) => () => void
 }

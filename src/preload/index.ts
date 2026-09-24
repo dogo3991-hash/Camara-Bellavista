@@ -14,6 +14,8 @@ const api = {
       ipcRenderer.invoke('camera:start-detection', config),
     stopDetection: (): Promise<void> => ipcRenderer.invoke('camera:stop-detection'),
     detectionStatus: (): Promise<boolean> => ipcRenderer.invoke('camera:detection-status'),
+    toggleMini: (): Promise<boolean> => ipcRenderer.invoke('camera:toggle-mini'),
+    miniStatus: (): Promise<boolean> => ipcRenderer.invoke('camera:mini-status'),
     onLog: (callback: (entry: CameraLogEntry) => void): (() => void) => {
       const listener = (_event: Electron.IpcRendererEvent, entry: CameraLogEntry): void =>
         callback(entry)

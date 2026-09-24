@@ -28,10 +28,12 @@ function App(): React.JSX.Element {
   const [errorMessage, setErrorMessage] = useState<string>('')
   const [detectionRunning, setDetectionRunning] = useState(false)
   const [log, setLog] = useState<CameraLogEntry[]>([])
+  const [miniOpen, setMiniOpen] = useState(false)
 
   useEffect(() => {
     window.api.camera.getConfig().then(setConfig)
     window.api.camera.detectionStatus().then(setDetectionRunning)
+    window.api.camera.miniStatus().then(setMiniOpen)
     const unsubscribe = window.api.camera.onLog((entry) => {
       setLog((prev) => [entry, ...prev].slice(0, MAX_LOG_ENTRIES))
     })
@@ -77,6 +79,10 @@ function App(): React.JSX.Element {
     await window.api.camera.saveConfig(trimmedConfig(config))
   }
 
+  async function handleToggleMini(): Promise<void> {
+    setMiniOpen(await window.api.camera.toggleMini())
+  }
+
   return (
     <div style={{ fontFamily: 'sans-serif', padding: 24, maxWidth: 640 }}>
       <h1>SLM Cámara Romana</h1>
@@ -118,6 +124,9 @@ function App(): React.JSX.Element {
             {status === 'loading' ? 'Probando…' : 'Probar conexión'}
           </button>
           <button onClick={handleSave}>Guardar configuración</button>
+          <button onClick={handleToggleMini}>
+            {miniOpen ? 'Cerrar mini visor' : 'Abrir mini visor'}
+          </button>
         </div>
 
         {status === 'error' && <p style={{ color: 'crimson' }}>Error: {errorMessage}</p>}

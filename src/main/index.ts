@@ -1,4 +1,4 @@
-import { app, shell, BrowserWindow, ipcMain } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, screen } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { loadConfig, saveConfig, type CameraConfig } from './camera/config'
@@ -18,8 +18,74 @@ process.stderr.on('error', (err: NodeJS.ErrnoException) => {
   if (err.code !== 'EPIPE') throw err
 })
 
+let mainWindow: BrowserWindow | null = null
+let miniWindow: BrowserWindow | null = null
+// La mini ventana solo se cierra desde el botón de la app (Alt+F4 u otros
+// intentos de cierre se ignoran mientras esta bandera esté en false).
+let allowMiniClose = false
+
+const MINI_WIDTH = 320
+const MINI_HEIGHT = 180
+const MINI_MARGIN = 16
+
+function loadRenderer(win: BrowserWindow, hash?: string): void {
+  if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
+    win.loadURL(process.env['ELECTRON_RENDERER_URL'] + (hash ? `#${hash}` : ''))
+  } else {
+    win.loadFile(join(__dirname, '../renderer/index.html'), hash ? { hash } : undefined)
+  }
+}
+
+function openMiniWindow(): void {
+  if (miniWindow) return
+
+  const { workArea } = screen.getPrimaryDisplay()
+  const win = new BrowserWindow({
+    width: MINI_WIDTH,
+    height: MINI_HEIGHT,
+    x: workArea.x + workArea.width - MINI_WIDTH - MINI_MARGIN,
+    y: workArea.y + workArea.height - MINI_HEIGHT - MINI_MARGIN,
+    frame: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    resizable: true,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    backgroundColor: '#000000',
+    webPreferences: {
+      preload: join(__dirname, '../preload/index.js'),
+      sandbox: false
+    }
+  })
+
+  // Nivel 'screen-saver' para quedar por encima del navegador u otras apps
+  // aunque tomen el foco.
+  win.setAlwaysOnTop(true, 'screen-saver')
+  win.setVisibleOnAllWorkspaces(true)
+  win.setAspectRatio(16 / 9)
+
+  win.on('close', (event) => {
+    if (!allowMiniClose) event.preventDefault()
+  })
+  win.on('closed', () => {
+    miniWindow = null
+  })
+
+  allowMiniClose = false
+  miniWindow = win
+  loadRenderer(win, 'mini')
+}
+
+function closeMiniWindow(): void {
+  if (!miniWindow) return
+  allowMiniClose = true
+  miniWindow.destroy()
+  miniWindow = null
+}
+
 function createWindow(): void {
-  const mainWindow = new BrowserWindow({
+  mainWindow = new BrowserWindow({
     width: 1000,
     height: 720,
     show: false,
@@ -30,20 +96,25 @@ function createWindow(): void {
     }
   })
 
-  mainWindow.on('ready-to-show', () => {
-    mainWindow.show()
+  const win = mainWindow
+
+  win.on('ready-to-show', () => {
+    win.show()
   })
 
-  mainWindow.webContents.setWindowOpenHandler((details) => {
+  // Si se cierra la app principal, la mini no debe quedar huérfana (y así
+  // 'window-all-closed' se dispara y la app termina).
+  win.on('closed', () => {
+    mainWindow = null
+    closeMiniWindow()
+  })
+
+  win.webContents.setWindowOpenHandler((details) => {
     shell.openExternal(details.url)
     return { action: 'deny' }
   })
 
-  if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
-    mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
-  } else {
-    mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
-  }
+  loadRenderer(win)
 }
 
 function registerCameraIpc(): void {
@@ -68,6 +139,14 @@ function registerCameraIpc(): void {
   })
 
   ipcMain.handle('camera:detection-status', () => cameraService.isRunning())
+
+  ipcMain.handle('camera:toggle-mini', () => {
+    if (miniWindow) closeMiniWindow()
+    else openMiniWindow()
+    return miniWindow !== null
+  })
+
+  ipcMain.handle('camera:mini-status', () => miniWindow !== null)
 
   cameraService.on('log', (entry: CameraLogEntry) => {
     for (const win of BrowserWindow.getAllWindows()) {
