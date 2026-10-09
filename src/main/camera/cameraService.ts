@@ -1,5 +1,6 @@
 import { EventEmitter } from 'events'
 import { MotionDetector } from './motionDetector'
+import { saveSettledCapture } from './captureArchive'
 import type { CameraConfig } from './config'
 
 export interface CameraLogEntry {
@@ -31,11 +32,23 @@ class CameraService extends EventEmitter {
       this.emit('truck-detected')
     })
     detector.on('settled', () => {
+      const timestamp = Date.now()
       this.log({
         type: 'settled',
         message: 'Camión asentado',
-        timestamp: Date.now()
+        timestamp
       })
+      saveSettledCapture(config, timestamp)
+        .then((path) =>
+          this.log({ type: 'info', message: `Captura guardada: ${path}`, timestamp: Date.now() })
+        )
+        .catch((err) =>
+          this.log({
+            type: 'error',
+            message: `No se pudo guardar la captura: ${err?.message ?? err}`,
+            timestamp: Date.now()
+          })
+        )
     })
     detector.on('error', (message: string) => {
       this.log({ type: 'error', message, timestamp: Date.now() })
