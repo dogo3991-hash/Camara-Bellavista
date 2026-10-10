@@ -39,6 +39,8 @@ export interface TruckIdentifiedEvent {
 
 export interface TruckUnrecognizedEvent {
   reason: string
+  // Patentes probables cuando duda entre dos camiones (la más parecida primero).
+  candidates: string[]
   timestamp: number
 }
 const fromHourLabel = `${String(ACTIVE_FROM_HOUR).padStart(2, '0')}:00`
@@ -178,7 +180,11 @@ class CameraService extends EventEmitter {
         message: `Camión no reconocido: ${result.reason}`,
         timestamp: Date.now()
       })
-      const event: TruckUnrecognizedEvent = { reason: result.reason, timestamp }
+      const event: TruckUnrecognizedEvent = {
+        reason: result.reason,
+        candidates: result.candidates ?? [],
+        timestamp
+      }
       this.emit('truck-unrecognized', event)
     }
   }

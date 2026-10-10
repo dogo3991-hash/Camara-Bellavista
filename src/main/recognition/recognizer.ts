@@ -60,7 +60,14 @@ interface TruckRef {
 export type Identification =
   | { kind: 'empty'; presence: number }
   | { kind: 'identified'; plate: string; distance: number; margin: number; presence: number }
-  | { kind: 'unrecognized'; reason: string; presence: number; plate?: string; margin?: number }
+  | {
+      kind: 'unrecognized'
+      reason: string
+      presence: number
+      // Cuando duda: las 2 patentes más probables, la más parecida primero.
+      candidates?: string[]
+      margin?: number
+    }
 
 function toRgb(bitmap: Buffer, width: number, height: number): RgbImage {
   // nativeImage entrega BGRA.
@@ -232,7 +239,7 @@ export class TruckRecognizer {
         kind: 'unrecognized',
         reason: `dudoso entre ${plate} y ${ranked[1][0]}`,
         presence,
-        plate,
+        candidates: [plate, ranked[1][0]],
         margin
       }
     }
