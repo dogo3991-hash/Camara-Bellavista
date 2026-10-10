@@ -1,5 +1,9 @@
 import { WebSocketServer, type WebSocket } from 'ws'
-import { cameraService } from './camera/cameraService'
+import {
+  cameraService,
+  type TruckIdentifiedEvent,
+  type TruckUnrecognizedEvent
+} from './camera/cameraService'
 import { startPreviewBroadcast, stopPreviewBroadcast } from './camera/previewBroadcaster'
 
 export const WS_PORT = 4545
@@ -31,6 +35,15 @@ export function startWsServer(onPreviewFrame?: (base64Jpeg: string) => void): vo
 
   cameraService.on('truck-detected', () => {
     broadcast({ type: 'truck-detected', timestamp: Date.now() })
+  })
+
+  // Pesaje automático: Pesos Bellavista abre el pesaje en espera de esa patente.
+  cameraService.on('truck-identified', (event: TruckIdentifiedEvent) => {
+    broadcast({ type: 'truck-identified', ...event })
+  })
+
+  cameraService.on('truck-unrecognized', (event: TruckUnrecognizedEvent) => {
+    broadcast({ type: 'truck-unrecognized', ...event })
   })
 
   startPreviewBroadcast({

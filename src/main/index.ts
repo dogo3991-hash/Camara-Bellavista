@@ -3,7 +3,7 @@ import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { loadConfig, saveConfig, type CameraConfig } from './camera/config'
 import { grabSnapshotJpeg } from './camera/rtsp'
-import { cameraService, type CameraLogEntry } from './camera/cameraService'
+import { cameraService, type CameraLogEntry, type DetectionStatus } from './camera/cameraService'
 import { startWsServer, stopWsServer } from './wsServer'
 import { setupAutoUpdater } from './autoUpdate'
 
@@ -120,9 +120,12 @@ function createWindow(): void {
 function registerCameraIpc(): void {
   ipcMain.handle('camera:get-config', () => loadConfig())
 
+  // 'autoWeigh' lo manejan solo los botones de pesaje automático; la pantalla no
+  // lo pisa al guardar el resto de la configuración.
   ipcMain.handle('camera:save-config', (_event, config: CameraConfig) => {
-    saveConfig(config)
-    return config
+    const merged = { ...config, autoWeigh: loadConfig().autoWeigh }
+    saveConfig(merged)
+    return merged
   })
 
   ipcMain.handle('camera:test-connection', async (_event, config: CameraConfig) => {
@@ -131,14 +134,31 @@ function registerCameraIpc(): void {
   })
 
   ipcMain.handle('camera:start-detection', (_event, config: CameraConfig) => {
-    cameraService.start(config)
+    cameraService.startDetection(config)
+    return cameraService.getStatus()
   })
 
   ipcMain.handle('camera:stop-detection', () => {
-    cameraService.stop()
+    cameraService.stopDetection()
+    return cameraService.getStatus()
   })
 
-  ipcMain.handle('camera:detection-status', () => cameraService.isRunning())
+  // El pesaje automático queda guardado en la config para que se reanude solo
+  // si se reinicia el PC o la app.
+  ipcMain.handle('camera:enable-auto-weigh', (_event, config: CameraConfig) => {
+    const merged = { ...config, autoWeigh: true }
+    saveConfig(merged)
+    cameraService.enableAutoWeigh(merged)
+    return cameraService.getStatus()
+  })
+
+  ipcMain.handle('camera:disable-auto-weigh', () => {
+    saveConfig({ ...loadConfig(), autoWeigh: false })
+    cameraService.disableAutoWeigh()
+    return cameraService.getStatus()
+  })
+
+  ipcMain.handle('camera:detection-status', () => cameraService.getStatus())
 
   ipcMain.handle('camera:toggle-mini', () => {
     if (miniWindow) closeMiniWindow()
@@ -151,6 +171,12 @@ function registerCameraIpc(): void {
   cameraService.on('log', (entry: CameraLogEntry) => {
     for (const win of BrowserWindow.getAllWindows()) {
       win.webContents.send('camera:log', entry)
+    }
+  })
+
+  cameraService.on('status', (status: DetectionStatus) => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      win.webContents.send('camera:detection-status', status)
     }
   })
 }
@@ -170,6 +196,9 @@ app.whenReady().then(() => {
   })
   setupAutoUpdater()
   createWindow()
+
+  const config = loadConfig()
+  if (config.autoWeigh) cameraService.enableAutoWeigh(config)
 
   app.on('activate', function () {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

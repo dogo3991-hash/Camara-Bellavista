@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 import type { CameraConfig } from '../main/camera/config'
-import type { CameraLogEntry } from '../main/camera/cameraService'
+import type { CameraLogEntry, DetectionStatus } from '../main/camera/cameraService'
 
 const api = {
   camera: {
@@ -10,10 +10,20 @@ const api = {
       ipcRenderer.invoke('camera:save-config', config),
     testConnection: (config: CameraConfig): Promise<string> =>
       ipcRenderer.invoke('camera:test-connection', config),
-    startDetection: (config: CameraConfig): Promise<void> =>
+    startDetection: (config: CameraConfig): Promise<DetectionStatus> =>
       ipcRenderer.invoke('camera:start-detection', config),
-    stopDetection: (): Promise<void> => ipcRenderer.invoke('camera:stop-detection'),
-    detectionStatus: (): Promise<boolean> => ipcRenderer.invoke('camera:detection-status'),
+    stopDetection: (): Promise<DetectionStatus> => ipcRenderer.invoke('camera:stop-detection'),
+    detectionStatus: (): Promise<DetectionStatus> => ipcRenderer.invoke('camera:detection-status'),
+    enableAutoWeigh: (config: CameraConfig): Promise<DetectionStatus> =>
+      ipcRenderer.invoke('camera:enable-auto-weigh', config),
+    disableAutoWeigh: (): Promise<DetectionStatus> =>
+      ipcRenderer.invoke('camera:disable-auto-weigh'),
+    onDetectionStatus: (callback: (status: DetectionStatus) => void): (() => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, status: DetectionStatus): void =>
+        callback(status)
+      ipcRenderer.on('camera:detection-status', listener)
+      return () => ipcRenderer.removeListener('camera:detection-status', listener)
+    },
     toggleMini: (): Promise<boolean> => ipcRenderer.invoke('camera:toggle-mini'),
     miniStatus: (): Promise<boolean> => ipcRenderer.invoke('camera:mini-status'),
     onLog: (callback: (entry: CameraLogEntry) => void): (() => void) => {

@@ -14,6 +14,8 @@ export interface CameraConfig {
   user: string
   password: string
   enabled: boolean
+  // Pesaje automático encendido; se recuerda para reanudarlo al abrir la app.
+  autoWeigh: boolean
   motionRoi: RoiFraction
   plateRoi: RoiFraction
   matchMaxDistance: number
@@ -27,6 +29,7 @@ export const DEFAULT_CONFIG: CameraConfig = {
   user: '',
   password: '',
   enabled: false,
+  autoWeigh: false,
   motionRoi: DEFAULT_ROI,
   plateRoi: DEFAULT_ROI,
   matchMaxDistance: 2,

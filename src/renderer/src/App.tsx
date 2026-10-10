@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { CameraConfig, RoiFraction } from '../../main/camera/config'
-import type { CameraLogEntry } from '../../main/camera/cameraService'
+import type { CameraLogEntry, DetectionStatus } from '../../main/camera/cameraService'
 import { RoiCalibrator } from './RoiCalibrator'
 import { DetectionPanel } from './DetectionPanel'
 
@@ -15,6 +15,7 @@ const EMPTY_CONFIG: CameraConfig = {
   user: '',
   password: '',
   enabled: false,
+  autoWeigh: false,
   motionRoi: { x: 0, y: 0, w: 1, h: 1 },
   plateRoi: { x: 0, y: 0, w: 1, h: 1 },
   matchMaxDistance: 2,
@@ -26,18 +27,27 @@ function App(): React.JSX.Element {
   const [snapshot, setSnapshot] = useState<string | null>(null)
   const [status, setStatus] = useState<'idle' | 'loading' | 'ok' | 'error'>('idle')
   const [errorMessage, setErrorMessage] = useState<string>('')
-  const [detectionRunning, setDetectionRunning] = useState(false)
+  const [detectionStatus, setDetectionStatus] = useState<DetectionStatus>({
+    running: false,
+    manual: false,
+    autoWeigh: 'off'
+  })
   const [log, setLog] = useState<CameraLogEntry[]>([])
   const [miniOpen, setMiniOpen] = useState(false)
 
   useEffect(() => {
     window.api.camera.getConfig().then(setConfig)
-    window.api.camera.detectionStatus().then(setDetectionRunning)
+    window.api.camera.detectionStatus().then(setDetectionStatus)
     window.api.camera.miniStatus().then(setMiniOpen)
-    const unsubscribe = window.api.camera.onLog((entry) => {
+    const unsubscribeLog = window.api.camera.onLog((entry) => {
       setLog((prev) => [entry, ...prev].slice(0, MAX_LOG_ENTRIES))
     })
-    return unsubscribe
+    // El horario puede pausar/reanudar la detección sin que se toque la pantalla.
+    const unsubscribeStatus = window.api.camera.onDetectionStatus(setDetectionStatus)
+    return () => {
+      unsubscribeLog()
+      unsubscribeStatus()
+    }
   }, [])
 
   // Reusa el mismo stream continuo (persistente, una sola conexión RTSP) que ya
@@ -53,13 +63,21 @@ function App(): React.JSX.Element {
   async function handleStartDetection(): Promise<void> {
     const trimmed = trimmedConfig(config)
     await window.api.camera.saveConfig(trimmed)
-    await window.api.camera.startDetection(trimmed)
-    setDetectionRunning(true)
+    setDetectionStatus(await window.api.camera.startDetection(trimmed))
   }
 
   async function handleStopDetection(): Promise<void> {
-    await window.api.camera.stopDetection()
-    setDetectionRunning(false)
+    setDetectionStatus(await window.api.camera.stopDetection())
+  }
+
+  async function handleEnableAutoWeigh(): Promise<void> {
+    const trimmed = trimmedConfig(config)
+    await window.api.camera.saveConfig(trimmed)
+    setDetectionStatus(await window.api.camera.enableAutoWeigh(trimmed))
+  }
+
+  async function handleDisableAutoWeigh(): Promise<void> {
+    setDetectionStatus(await window.api.camera.disableAutoWeigh())
   }
 
   async function handleTestConnection(): Promise<void> {
@@ -144,10 +162,12 @@ function App(): React.JSX.Element {
       </div>
 
       <DetectionPanel
-        running={detectionRunning}
+        status={detectionStatus}
         log={log}
         onStart={handleStartDetection}
         onStop={handleStopDetection}
+        onEnableAutoWeigh={handleEnableAutoWeigh}
+        onDisableAutoWeigh={handleDisableAutoWeigh}
       />
     </div>
   )
