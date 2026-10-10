@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 import type { CameraConfig } from '../main/camera/config'
 import type { CameraLogEntry, DetectionStatus } from '../main/camera/cameraService'
+import type { KnownTruck, TruckPhotoThumb } from '../main/recognition/recognizer'
 
 const api = {
   camera: {
@@ -18,6 +19,18 @@ const api = {
       ipcRenderer.invoke('camera:enable-auto-weigh', config),
     disableAutoWeigh: (): Promise<DetectionStatus> =>
       ipcRenderer.invoke('camera:disable-auto-weigh'),
+    knownTrucks: (): Promise<KnownTruck[]> => ipcRenderer.invoke('camera:known-trucks'),
+    truckPhotos: (plate: string): Promise<TruckPhotoThumb[]> =>
+      ipcRenderer.invoke('camera:truck-photos', plate),
+    deleteTruckPhoto: (plate: string, file: string): Promise<void> =>
+      ipcRenderer.invoke('camera:delete-truck-photo', plate, file),
+    setTruckPaused: (plate: string, paused: boolean): Promise<void> =>
+      ipcRenderer.invoke('camera:set-truck-paused', plate, paused),
+    onKnownChanged: (callback: () => void): (() => void) => {
+      const listener = (): void => callback()
+      ipcRenderer.on('camera:known-changed', listener)
+      return () => ipcRenderer.removeListener('camera:known-changed', listener)
+    },
     onDetectionStatus: (callback: (status: DetectionStatus) => void): (() => void) => {
       const listener = (_event: Electron.IpcRendererEvent, status: DetectionStatus): void =>
         callback(status)

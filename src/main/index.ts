@@ -1,4 +1,4 @@
-import { app, shell, BrowserWindow, ipcMain, screen } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, nativeImage, screen } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { loadConfig, saveConfig, type CameraConfig } from './camera/config'
@@ -168,9 +168,35 @@ function registerCameraIpc(): void {
 
   ipcMain.handle('camera:mini-status', () => miniWindow !== null)
 
+  ipcMain.handle('camera:known-trucks', () => cameraService.listKnownTrucks())
+
+  // Miniaturas de las fotos de referencia de una patente (para revisarlas y borrar
+  // una mala).
+  ipcMain.handle('camera:truck-photos', (_event, plate: string) =>
+    cameraService.listTruckPhotos(plate).map((photo) => ({
+      file: photo.file,
+      time: photo.time,
+      thumbnail: nativeImage.createFromPath(photo.path).resize({ width: 240 }).toDataURL()
+    }))
+  )
+
+  ipcMain.handle('camera:delete-truck-photo', (_event, plate: string, file: string) =>
+    cameraService.deleteTruckPhoto(plate, file)
+  )
+
+  ipcMain.handle('camera:set-truck-paused', (_event, plate: string, paused: boolean) =>
+    cameraService.setTruckPaused(plate, paused)
+  )
+
   cameraService.on('log', (entry: CameraLogEntry) => {
     for (const win of BrowserWindow.getAllWindows()) {
       win.webContents.send('camera:log', entry)
+    }
+  })
+
+  cameraService.on('known-changed', () => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      win.webContents.send('camera:known-changed')
     }
   })
 

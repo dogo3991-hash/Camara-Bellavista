@@ -27,6 +27,17 @@ export function startWsServer(onPreviewFrame?: (base64Jpeg: string) => void): vo
 
   wss.on('connection', (socket: WebSocket) => {
     socket.send(JSON.stringify({ type: 'hello' }))
+    // Pesos Bellavista avisa cada pesaje completado: la cámara aprende de esa foto.
+    socket.on('message', (data) => {
+      try {
+        const message = JSON.parse(data.toString())
+        if (message?.type === 'weighing-completed' && typeof message.patente === 'string') {
+          void cameraService.learnFrom(message.patente)
+        }
+      } catch {
+        // Mensaje malformado: se ignora.
+      }
+    })
   })
 
   wss.on('error', (err) => {

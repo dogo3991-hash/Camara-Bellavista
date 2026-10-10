@@ -4,7 +4,12 @@ import { appendSettleTiming, saveSettledCapture } from './captureArchive'
 import type { CameraConfig } from './config'
 import { activeHoursLabel, isWithinActiveHours, ACTIVE_FROM_HOUR } from './detectionSchedule'
 import { grabSnapshotJpeg } from './rtsp'
-import { TruckRecognizer, referencesDir } from '../recognition/recognizer'
+import {
+  TruckRecognizer,
+  referencesDir,
+  type KnownTruck,
+  type TruckPhoto
+} from '../recognition/recognizer'
 
 export interface CameraLogEntry {
   type: 'truck-detected' | 'settled' | 'identified' | 'frame' | 'error' | 'info'
@@ -60,6 +65,7 @@ class CameraService extends EventEmitter {
   private recognizer = new TruckRecognizer()
   private refreshingBackground = false
   private lastBackgroundAttempt = 0
+  private referencesLoaded: Promise<void> | null = null
 
   startDetection(config: CameraConfig): void {
     this.manualOn = true
@@ -84,10 +90,18 @@ class CameraService extends EventEmitter {
       timestamp: Date.now()
     })
     this.useConfig(config)
+    // Se recargan al activar, por si cambió algo en la carpeta de referencias.
     void this.loadReferences()
   }
 
-  private async loadReferences(): Promise<void> {
+  // Las cargas van una detrás de otra: dos en paralelo mezclarían las fotos.
+  private loadReferences(): Promise<void> {
+    const previous = this.referencesLoaded ?? Promise.resolve()
+    this.referencesLoaded = previous.then(() => this.doLoadReferences())
+    return this.referencesLoaded
+  }
+
+  private async doLoadReferences(): Promise<void> {
     try {
       const counts = await this.recognizer.load()
       const summary = Object.entries(counts)
@@ -114,6 +128,7 @@ class CameraService extends EventEmitter {
       })
     }
     this.lastBackgroundAttempt = 0
+    this.emit('known-changed')
     void this.maybeRefreshBackground()
   }
 
@@ -125,7 +140,7 @@ class CameraService extends EventEmitter {
   // camión entrando. Si la foto sale con camión, no se usa.
   private async maybeRefreshBackground(): Promise<void> {
     const now = Date.now()
-    if (!this.autoWeighActive() || !this.config || !this.recognizer.isReady()) return
+    if (!this.isRunning() || !this.config || !this.recognizer.hasEmpties()) return
     if (this.refreshingBackground || this.detectedAt !== null) return
     if (this.recognizer.backgroundAgeMs(now) < BACKGROUND_REFRESH_AFTER_MS) return
     if (now - this.lastBackgroundAttempt < BACKGROUND_RETRY_MS) return
@@ -151,8 +166,80 @@ class CameraService extends EventEmitter {
     }
   }
 
+  // Cada captura se revisa (aunque el pesaje automático esté apagado) para tener
+  // la última romana vacía y la última foto con camión, de la que se aprende al
+  // completarse su pesaje en Pesos Bellavista.
+  private afterCapture(jpeg: Buffer, timestamp: number): void {
+    if (!this.recognizer.hasEmpties()) return
+    if (this.autoWeighActive() && this.recognizer.isReady()) {
+      this.recognize(jpeg, timestamp)
+      return
+    }
+    try {
+      this.recognizer.observe(jpeg, timestamp)
+    } catch (err) {
+      this.log({
+        type: 'error',
+        message: `Error al revisar la captura: ${err instanceof Error ? err.message : err}`,
+        timestamp: Date.now()
+      })
+    }
+  }
+
+  // Pesos Bellavista avisó que se completó el pesaje de esta patente.
+  async learnFrom(patente: string): Promise<void> {
+    if (!this.referencesLoaded) await this.loadReferences()
+    await this.referencesLoaded
+    try {
+      const result = await this.recognizer.learn(patente)
+      if (result.saved) {
+        this.log({
+          type: 'info',
+          message: result.active
+            ? `Foto guardada como referencia de ${result.plate} (${result.photos} fotos)`
+            : `Foto guardada como referencia de ${result.plate} (${result.photos} de 3 para empezar a reconocerlo)`,
+          timestamp: Date.now()
+        })
+        this.emit('known-changed')
+      } else {
+        this.log({
+          type: 'info',
+          message: `Pesaje de ${patente} completado; no se guardó foto de referencia: ${result.reason}`,
+          timestamp: Date.now()
+        })
+      }
+    } catch (err) {
+      this.log({
+        type: 'error',
+        message: `No se pudo guardar la foto de referencia de ${patente}: ${err instanceof Error ? err.message : err}`,
+        timestamp: Date.now()
+      })
+    }
+  }
+
+  // ---------- pantalla "Camiones conocidos" ----------
+
+  async listKnownTrucks(): Promise<KnownTruck[]> {
+    if (!this.referencesLoaded) await this.loadReferences()
+    await this.referencesLoaded
+    return this.recognizer.listKnown()
+  }
+
+  listTruckPhotos(plate: string): TruckPhoto[] {
+    return this.recognizer.listPhotos(plate)
+  }
+
+  async deleteTruckPhoto(plate: string, file: string): Promise<void> {
+    await this.recognizer.deletePhoto(plate, file)
+    this.emit('known-changed')
+  }
+
+  async setTruckPaused(plate: string, paused: boolean): Promise<void> {
+    await this.recognizer.setPaused(plate, paused)
+    this.emit('known-changed')
+  }
+
   private recognize(jpeg: Buffer, timestamp: number): void {
-    if (!this.recognizer.isReady()) return
     let result
     try {
       result = this.recognizer.identify(jpeg, timestamp)
@@ -238,6 +325,7 @@ class CameraService extends EventEmitter {
   }
 
   private start(config: CameraConfig): void {
+    if (!this.referencesLoaded) void this.loadReferences()
     if (this.detector) {
       this.detector.stop()
       this.detector.removeAllListeners()
@@ -277,7 +365,7 @@ class CameraService extends EventEmitter {
       saveSettledCapture(config, timestamp)
         .then(({ path, jpeg }) => {
           this.log({ type: 'info', message: `Captura guardada: ${path}`, timestamp: Date.now() })
-          if (this.autoWeighActive()) this.recognize(jpeg, timestamp)
+          this.afterCapture(jpeg, timestamp)
         })
         .catch((err) =>
           this.log({

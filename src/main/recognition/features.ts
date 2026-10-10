@@ -35,6 +35,12 @@ export const CAB_SIZE = 55
 export const PRESENCE_THRESHOLD = 0.29
 // Mínimo de 2º camión / camión elegido para dar por buena la identificación.
 export const MIN_MARGIN = 1.05
+// Distancia máxima al camión elegido. Un camión que no está en las referencias
+// igual queda más cerca de alguno, a veces con buen margen: dejando cada camión
+// fuera de las referencias, con 0,24 (y la medida de franjas flúor) ninguno (0/40)
+// pasó por otro, y 5/40 pasadas de camiones conocidos quedaron "no reconocido"
+// (pesaje manual). Con más fotos de cada camión esas distancias bajan.
+export const MAX_MATCH_DISTANCE = 0.24
 
 export function cropImage(img: RgbImage, box: Box): RgbImage {
   const x0 = Math.floor(box.x0 * img.width)
@@ -146,7 +152,21 @@ export function maskCount(mask: Uint8Array): number {
 export interface TruckFeatures {
   hist: Float64Array
   grid: Float64Array // 4x4 celdas x RGB
+  // Fracción del camión de color amarillo flúor (franjas reflectantes).
+  fluor: number
 }
+
+// Amarillo-verde flúor muy saturado y brillante: en las fotos reales, el CCTX-59
+// (franjas reflectantes) tiene 9-17 % de su superficie de este color y ningún
+// otro camión tiene nada. El histograma de color solo no lo distinguía bien del
+// DRZS-21 (también naranjo), porque las franjas son delgadas.
+function isFluor(h: number, s: number, v: number): boolean {
+  return h >= 48 && h <= 85 && s >= 0.45 && v >= 0.55
+}
+// Con al menos esta fracción se considera que el camión "tiene franjas flúor".
+const FLUOR_PRESENT = 0.05
+// Cuánto suma a la distancia que un camión tenga franjas flúor y el otro no.
+const FLUOR_WEIGHT = 0.15
 
 function rgbToHsv(r: number, g: number, b: number): [number, number, number] {
   const mx = Math.max(r, g, b)
@@ -167,6 +187,7 @@ export function truckFeatures(img: RgbImage, mask: Uint8Array): TruckFeatures {
   // Histograma: 18 tonos x 3 saturaciones + 4 niveles de gris para lo sin color.
   const hist = new Float64Array(18 * 3 + 4)
   let count = 0
+  let fluor = 0
   let x0 = width
   let y0 = height
   let x1 = 0
@@ -180,6 +201,7 @@ export function truckFeatures(img: RgbImage, mask: Uint8Array): TruckFeatures {
       const g = data[i * 3 + 1]
       const b = data[i * 3 + 2]
       const [h, s, v] = rgbToHsv(r, g, b)
+      if (isFluor(h, s, v)) fluor++
       if (s < 0.15 || v < 0.12) {
         hist[54 + Math.min(3, Math.floor(v * 4))]++
       } else {
@@ -226,7 +248,7 @@ export function truckFeatures(img: RgbImage, mask: Uint8Array): TruckFeatures {
       for (let c = 0; c < 3; c++) grid[cell + c] = n > 5 ? sum[c] / n : mean[c]
     }
   }
-  return { hist, grid }
+  return { hist, grid, fluor: fluor / Math.max(1, count) }
 }
 
 export function featureDistance(a: TruckFeatures, b: TruckFeatures): number {
@@ -241,5 +263,7 @@ export function featureDistance(a: TruckFeatures, b: TruckFeatures): number {
       a.grid[c * 3 + 2] - b.grid[c * 3 + 2]
     )
   }
-  return 0.6 * dHist + 0.4 * (dGrid / 16)
+  const fluorA = Math.min(1, a.fluor / FLUOR_PRESENT)
+  const fluorB = Math.min(1, b.fluor / FLUOR_PRESENT)
+  return 0.6 * dHist + 0.4 * (dGrid / 16) + FLUOR_WEIGHT * Math.abs(fluorA - fluorB)
 }

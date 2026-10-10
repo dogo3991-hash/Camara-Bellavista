@@ -3,6 +3,7 @@ import type { CameraConfig, RoiFraction } from '../../main/camera/config'
 import type { CameraLogEntry, DetectionStatus } from '../../main/camera/cameraService'
 import { RoiCalibrator } from './RoiCalibrator'
 import { DetectionPanel } from './DetectionPanel'
+import { KnownTrucksPanel } from './KnownTrucksPanel'
 
 const MAX_LOG_ENTRIES = 50
 
@@ -169,6 +170,8 @@ function App(): React.JSX.Element {
         onEnableAutoWeigh={handleEnableAutoWeigh}
         onDisableAutoWeigh={handleDisableAutoWeigh}
       />
+
+      <KnownTrucksPanel />
     </div>
   )
 }

@@ -1,11 +1,13 @@
 import { app, nativeImage } from 'electron'
 import { existsSync } from 'fs'
-import { readdir, readFile } from 'fs/promises'
-import { join } from 'path'
+import { mkdir, readdir, readFile, rm, writeFile } from 'fs/promises'
+import { hostname } from 'os'
+import { basename, join } from 'path'
 import {
   CAB_BOX,
   CAB_SIZE,
   GROUND_BOX,
+  MAX_MATCH_DISTANCE,
   MIN_MARGIN,
   PRESENCE_THRESHOLD,
   SMALL_HEIGHT,
@@ -124,16 +126,95 @@ function parseName(file: string): { time: number; source: string } | null {
   }
 }
 
+// Un camión empieza a reconocerse cuando junta esta cantidad de fotos.
+export const MIN_REFS_TO_RECOGNIZE = 3
+// Para que la carpeta no crezca sin fin: al pasarse, se borran las más antiguas.
+const MAX_REFS_PER_PLATE = 40
+const MAX_EMPTIES = 300
+// Al completarse un pesaje se aprende de la última foto con camión, si es de hace
+// menos de esto (el camión estuvo detenido en la romana hace poco).
+const LEARN_MAX_AGE_MS = 15 * 60 * 1000
+// Si la foto se parece claramente a otro camión ya conocido (su distancia es al
+// menos esto veces menor), no se guarda con la patente indicada. Solo se revisa
+// para camiones con muchas fotos: uno nuevo al principio puede parecerse más a
+// otro, y si se le negaran las fotos nunca aprendería.
+const LEARN_CONFLICT_MARGIN = 1.3
+const LEARN_CONFLICT_MIN_REFS = 8
+const PAUSED_FILE = 'pausados.json'
+
+// Identifica de qué PC salió cada foto aprendida (ver parseName).
+const LEARN_SOURCE = hostname()
+  .toLowerCase()
+  .replace(/[^a-z0-9]+/g, '-')
+
+export function normalizePlate(plate: string): string {
+  return plate.toUpperCase().replace(/[^A-Z0-9]/g, '')
+}
+
+function folderNameFor(plate: string): string {
+  return plate.toUpperCase().replace(/[^A-Z0-9-]/g, '')
+}
+
+const pad = (n: number): string => String(n).padStart(2, '0')
+
+function stampName(time: number): string {
+  const d = new Date(time)
+  return (
+    `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}_` +
+    `${pad(d.getHours())}-${pad(d.getMinutes())}-${pad(d.getSeconds())}_${LEARN_SOURCE}.jpg`
+  )
+}
+
+export interface KnownTruck {
+  plate: string
+  photos: number
+  status: 'juntando' | 'activo' | 'pausado'
+}
+
+// Lo que recibe la pantalla: la foto como miniatura (data URL).
+export interface TruckPhotoThumb {
+  file: string
+  time: number
+  thumbnail: string
+}
+
+export interface TruckPhoto {
+  file: string
+  time: number
+  path: string
+}
+
+export type LearnResult =
+  { saved: true; plate: string; photos: number; active: boolean } | { saved: false; reason: string }
+
+interface Observation {
+  frame: Frame
+  presence: number
+  empty: boolean
+}
+
 export class TruckRecognizer {
-  private empties: EmptyRef[] = []
-  private trucks: TruckRef[] = []
-  private liveEmpty: { frame: Frame; time: number } | null = null
+  private dir = referencesDir()
+  private empties: (EmptyRef & { path: string })[] = []
+  private trucks: (TruckRef & { path: string; time: number })[] = []
+  private paused = new Set<string>()
+  private liveEmpty: { frame: Frame; time: number; jpeg: Buffer } | null = null
+  private lastTruck: { frame: Frame; time: number; jpeg: Buffer; used: boolean } | null = null
 
   // Carga las referencias. Devuelve cuántas fotos hay por patente.
   async load(dir = referencesDir()): Promise<Record<string, number>> {
+    this.dir = dir
     this.empties = []
     this.trucks = []
+    this.paused = new Set()
     if (!existsSync(dir)) return {}
+
+    try {
+      const raw = JSON.parse(await readFile(join(dir, PAUSED_FILE), 'utf-8'))
+      if (Array.isArray(raw)) this.paused = new Set(raw.map(String))
+    } catch {
+      // Sin camiones pausados.
+    }
 
     const folders = (await readdir(dir, { withFileTypes: true })).filter((d) => d.isDirectory())
     const truckFiles: { plate: string; path: string; time: number; source: string }[] = []
@@ -143,7 +224,7 @@ export class TruckRecognizer {
         if (!parsed) continue
         const path = join(dir, folder.name, file)
         if (folder.name.toLowerCase() === EMPTY_FOLDER) {
-          this.empties.push({ ...decodeFrame(await readFile(path)), ...parsed })
+          this.empties.push({ ...decodeFrame(await readFile(path)), ...parsed, path })
         } else {
           truckFiles.push({ plate: folder.name.toUpperCase(), path, ...parsed })
         }
@@ -157,14 +238,34 @@ export class TruckRecognizer {
       if (!bg) continue
       const mask = truckMask(frame.truck, frame.ground, bg.truck, bg.ground)
       if (maskCount(mask) < MIN_MASK_PIXELS) continue
-      this.trucks.push({ plate: ref.plate, features: truckFeatures(frame.truck, mask) })
+      this.trucks.push({
+        plate: ref.plate,
+        features: truckFeatures(frame.truck, mask),
+        path: ref.path,
+        time: ref.time
+      })
       counts[ref.plate] = (counts[ref.plate] ?? 0) + 1
     }
     return counts
   }
 
+  hasEmpties(): boolean {
+    return this.empties.length > 0
+  }
+
+  // Camiones que se reconocen: con fotos suficientes y no pausados.
+  private activePlates(): Set<string> {
+    const counts = new Map<string, number>()
+    for (const t of this.trucks) counts.set(t.plate, (counts.get(t.plate) ?? 0) + 1)
+    return new Set(
+      [...counts]
+        .filter(([plate, n]) => n >= MIN_REFS_TO_RECOGNIZE && !this.paused.has(plate))
+        .map(([plate]) => plate)
+    )
+  }
+
   isReady(): boolean {
-    return this.empties.length > 0 && new Set(this.trucks.map((t) => t.plate)).size >= 2
+    return this.empties.length > 0 && this.activePlates().size >= 2
   }
 
   // Romana vacía del mismo PC más cercana en el tiempo (para las referencias).
@@ -193,47 +294,47 @@ export class TruckRecognizer {
     return presence
   }
 
+  // Revisa una captura: si muestra la romana vacía pasa a ser el fondo; si muestra
+  // un camión queda guardada para aprender de ella cuando se complete su pesaje.
+  observe(jpeg: Buffer, now = Date.now()): Observation {
+    const frame = decodeFrame(jpeg)
+    const presence = this.presenceOf(frame)
+    const empty = presence < PRESENCE_THRESHOLD
+    if (empty) this.liveEmpty = { frame, time: now, jpeg }
+    else this.lastTruck = { frame, time: now, jpeg, used: false }
+    return { frame, presence, empty }
+  }
+
   // Si la foto muestra la romana vacía, pasa a ser el fondo. Devuelve si estaba vacía.
   refreshBackground(jpeg: Buffer, now = Date.now()): boolean {
     const frame = decodeFrame(jpeg)
     if (this.presenceOf(frame) >= PRESENCE_THRESHOLD) return false
-    this.liveEmpty = { frame, time: now }
+    this.liveEmpty = { frame, time: now, jpeg }
     return true
   }
 
   identify(jpeg: Buffer, now = Date.now()): Identification {
-    const frame = decodeFrame(jpeg)
-    const presence = this.presenceOf(frame)
-    if (presence < PRESENCE_THRESHOLD) {
-      this.liveEmpty = { frame, time: now }
-      return { kind: 'empty', presence }
-    }
+    const { frame, presence, empty } = this.observe(jpeg, now)
+    if (empty) return { kind: 'empty', presence }
 
-    if (!this.liveEmpty || now - this.liveEmpty.time > LIVE_EMPTY_MAX_AGE_MS) {
-      return {
-        kind: 'unrecognized',
-        reason: 'no hay una foto reciente de la romana vacía',
-        presence
-      }
-    }
-    const bg = this.liveEmpty.frame
-    const mask = truckMask(frame.truck, frame.ground, bg.truck, bg.ground)
-    if (maskCount(mask) < MIN_MASK_PIXELS) {
-      return { kind: 'unrecognized', reason: 'no se distingue el camión del fondo', presence }
-    }
-    const features = truckFeatures(frame.truck, mask)
+    const features = this.featuresAgainstLiveEmpty(frame, now)
+    if (typeof features === 'string') return { kind: 'unrecognized', reason: features, presence }
 
-    const best = new Map<string, number>()
-    for (const ref of this.trucks) {
-      const d = featureDistance(features, ref.features)
-      if (d < (best.get(ref.plate) ?? Infinity)) best.set(ref.plate, d)
-    }
-    const ranked = [...best.entries()].sort((a, b) => a[1] - b[1])
+    const ranked = this.rank(features, this.activePlates())
     if (ranked.length < 2) {
       return { kind: 'unrecognized', reason: 'faltan camiones de referencia', presence }
     }
     const [plate, distance] = ranked[0]
     const margin = ranked[1][1] / Math.max(distance, 1e-6)
+    if (distance > MAX_MATCH_DISTANCE) {
+      return {
+        kind: 'unrecognized',
+        reason: `no se parece lo suficiente a ningún camión conocido (el más parecido es ${plate})`,
+        presence,
+        candidates: [plate, ranked[1][0]],
+        margin
+      }
+    }
     if (margin < MIN_MARGIN) {
       return {
         kind: 'unrecognized',
@@ -244,5 +345,141 @@ export class TruckRecognizer {
       }
     }
     return { kind: 'identified', plate, distance, margin, presence }
+  }
+
+  // Características del camión restándole la romana vacía vista en vivo, o el
+  // motivo por el que no se puede.
+  private featuresAgainstLiveEmpty(frame: Frame, time: number): TruckFeatures | string {
+    if (!this.liveEmpty || Math.abs(time - this.liveEmpty.time) > LIVE_EMPTY_MAX_AGE_MS) {
+      return 'no hay una foto reciente de la romana vacía'
+    }
+    const bg = this.liveEmpty.frame
+    const mask = truckMask(frame.truck, frame.ground, bg.truck, bg.ground)
+    if (maskCount(mask) < MIN_MASK_PIXELS) return 'no se distingue el camión del fondo'
+    return truckFeatures(frame.truck, mask)
+  }
+
+  // Distancia al camión más parecido de cada patente, de menor a mayor.
+  private rank(features: TruckFeatures, plates: Set<string>): [string, number][] {
+    const best = new Map<string, number>()
+    for (const ref of this.trucks) {
+      if (!plates.has(ref.plate)) continue
+      const d = featureDistance(features, ref.features)
+      if (d < (best.get(ref.plate) ?? Infinity)) best.set(ref.plate, d)
+    }
+    return [...best.entries()].sort((a, b) => a[1] - b[1])
+  }
+
+  // Se completó el pesaje de esta patente: guarda la última foto con camión como
+  // referencia suya (junto con la romana vacía usada de fondo).
+  async learn(patente: string, now = Date.now()): Promise<LearnResult> {
+    const truck = this.lastTruck
+    if (!truck || truck.used || now - truck.time > LEARN_MAX_AGE_MS) {
+      return {
+        saved: false,
+        reason: 'no hubo un camión detenido en la romana en los últimos 15 min'
+      }
+    }
+    const live = this.liveEmpty
+    const features = this.featuresAgainstLiveEmpty(truck.frame, truck.time)
+    if (typeof features === 'string' || !live) {
+      return { saved: false, reason: typeof features === 'string' ? features : 'sin fondo' }
+    }
+
+    const known = [...new Set(this.trucks.map((t) => t.plate))]
+    const plate =
+      known.find((p) => normalizePlate(p) === normalizePlate(patente)) ?? folderNameFor(patente)
+    if (!plate) return { saved: false, reason: `patente inválida "${patente}"` }
+
+    // Protección contra etiquetas equivocadas (ej. se completó el pesaje de otro
+    // camión): si la foto es claramente de otro camión ya conocido, no se guarda.
+    const active = this.activePlates()
+    const ownCount = this.trucks.filter((t) => t.plate === plate).length
+    if (active.has(plate) && ownCount >= LEARN_CONFLICT_MIN_REFS) {
+      const ranked = this.rank(features, active)
+      const own = ranked.find(([p]) => p === plate)?.[1] ?? Infinity
+      const [other, otherDistance] = ranked[0]
+      if (
+        other !== plate &&
+        otherDistance <= MAX_MATCH_DISTANCE &&
+        own / Math.max(otherDistance, 1e-6) >= LEARN_CONFLICT_MARGIN
+      ) {
+        return { saved: false, reason: `la foto se parece mucho más a ${other}` }
+      }
+    }
+
+    truck.used = true
+    const truckDir = join(this.dir, plate)
+    const emptyDir = join(this.dir, EMPTY_FOLDER)
+    await mkdir(truckDir, { recursive: true })
+    await mkdir(emptyDir, { recursive: true })
+    const truckPath = join(truckDir, stampName(truck.time))
+    await writeFile(truckPath, truck.jpeg)
+    const emptyPath = join(emptyDir, stampName(live.time))
+    if (!this.empties.some((e) => e.path === emptyPath)) {
+      await writeFile(emptyPath, live.jpeg)
+      this.empties.push({ ...live.frame, time: live.time, source: LEARN_SOURCE, path: emptyPath })
+    }
+    this.trucks.push({ plate, features, path: truckPath, time: truck.time })
+    await this.trimOldest()
+
+    const photos = this.trucks.filter((t) => t.plate === plate).length
+    return { saved: true, plate, photos, active: photos >= MIN_REFS_TO_RECOGNIZE }
+  }
+
+  private async trimOldest(): Promise<void> {
+    for (const plate of new Set(this.trucks.map((t) => t.plate))) {
+      const refs = this.trucks.filter((t) => t.plate === plate).sort((a, b) => a.time - b.time)
+      for (const old of refs.slice(0, Math.max(0, refs.length - MAX_REFS_PER_PLATE))) {
+        await this.removeTruckRef(old.path)
+      }
+    }
+    const empties = [...this.empties].sort((a, b) => a.time - b.time)
+    for (const old of empties.slice(0, Math.max(0, empties.length - MAX_EMPTIES))) {
+      this.empties = this.empties.filter((e) => e !== old)
+      await rm(old.path, { force: true })
+    }
+  }
+
+  private async removeTruckRef(path: string): Promise<void> {
+    this.trucks = this.trucks.filter((t) => t.path !== path)
+    await rm(path, { force: true })
+  }
+
+  // ---------- pantalla "Camiones conocidos" ----------
+
+  listKnown(): KnownTruck[] {
+    const counts = new Map<string, number>()
+    for (const t of this.trucks) counts.set(t.plate, (counts.get(t.plate) ?? 0) + 1)
+    return [...counts]
+      .map(([plate, photos]): KnownTruck => ({
+        plate,
+        photos,
+        status: this.paused.has(plate)
+          ? 'pausado'
+          : photos >= MIN_REFS_TO_RECOGNIZE
+            ? 'activo'
+            : 'juntando'
+      }))
+      .sort((a, b) => a.plate.localeCompare(b.plate))
+  }
+
+  listPhotos(plate: string): TruckPhoto[] {
+    return this.trucks
+      .filter((t) => t.plate === plate)
+      .sort((a, b) => b.time - a.time)
+      .map((t) => ({ file: basename(t.path), time: t.time, path: t.path }))
+  }
+
+  async deletePhoto(plate: string, file: string): Promise<void> {
+    const ref = this.trucks.find((t) => t.plate === plate && basename(t.path) === file)
+    if (ref) await this.removeTruckRef(ref.path)
+  }
+
+  async setPaused(plate: string, paused: boolean): Promise<void> {
+    if (paused) this.paused.add(plate)
+    else this.paused.delete(plate)
+    await mkdir(this.dir, { recursive: true })
+    await writeFile(join(this.dir, PAUSED_FILE), JSON.stringify([...this.paused], null, 2), 'utf-8')
   }
 }

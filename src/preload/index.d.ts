@@ -2,7 +2,9 @@ import { ElectronAPI } from '@electron-toolkit/preload'
 import type { CameraConfig } from '../main/camera/config'
 import type { CameraLogEntry, DetectionStatus } from '../main/camera/cameraService'
 
-export type { CameraLogEntry, DetectionStatus }
+import type { KnownTruck, TruckPhotoThumb } from '../main/recognition/recognizer'
+
+export type { CameraLogEntry, DetectionStatus, KnownTruck, TruckPhotoThumb }
 
 export interface CameraApi {
   getConfig: () => Promise<CameraConfig>
@@ -13,6 +15,11 @@ export interface CameraApi {
   detectionStatus: () => Promise<DetectionStatus>
   enableAutoWeigh: (config: CameraConfig) => Promise<DetectionStatus>
   disableAutoWeigh: () => Promise<DetectionStatus>
+  knownTrucks: () => Promise<KnownTruck[]>
+  truckPhotos: (plate: string) => Promise<TruckPhotoThumb[]>
+  deleteTruckPhoto: (plate: string, file: string) => Promise<void>
+  setTruckPaused: (plate: string, paused: boolean) => Promise<void>
+  onKnownChanged: (callback: () => void) => () => void
   onDetectionStatus: (callback: (status: DetectionStatus) => void) => () => void
   toggleMini: () => Promise<boolean>
   miniStatus: () => Promise<boolean>
