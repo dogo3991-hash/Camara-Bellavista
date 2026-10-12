@@ -31,7 +31,8 @@ function App(): React.JSX.Element {
   const [detectionStatus, setDetectionStatus] = useState<DetectionStatus>({
     running: false,
     manual: false,
-    autoWeigh: 'off'
+    autoWeigh: 'off',
+    autoWeighNote: null
   })
   const [log, setLog] = useState<CameraLogEntry[]>([])
   const [miniOpen, setMiniOpen] = useState(false)

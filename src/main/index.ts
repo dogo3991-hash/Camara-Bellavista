@@ -194,6 +194,11 @@ function registerCameraIpc(): void {
     }
   })
 
+  // Otro PC tiene el turno: queda apagado también al reiniciar la app.
+  cameraService.on('auto-weigh-denied', () => {
+    saveConfig({ ...loadConfig(), autoWeigh: false })
+  })
+
   cameraService.on('known-changed', () => {
     for (const win of BrowserWindow.getAllWindows()) {
       win.webContents.send('camera:known-changed')

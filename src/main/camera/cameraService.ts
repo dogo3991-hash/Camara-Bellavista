@@ -19,8 +19,9 @@ export interface CameraLogEntry {
 }
 
 // 'active': dentro del horario y vigilando. 'waiting': encendido pero fuera de
-// horario. 'off': apagado por el usuario.
-export type AutoWeighStatus = 'active' | 'waiting' | 'off'
+// horario. 'no-lock': encendido, esperando que Pesos Bellavista de este PC le dé el
+// turno (un solo PC a la vez hace el pesaje automático). 'off': apagado.
+export type AutoWeighStatus = 'active' | 'waiting' | 'no-lock' | 'off'
 
 export interface DetectionStatus {
   // La detección de movimiento está corriendo (por cualquiera de los dos motivos).
@@ -28,6 +29,8 @@ export interface DetectionStatus {
   // El usuario la inició con "Iniciar detección" (alerta sonora, sin horario).
   manual: boolean
   autoWeigh: AutoWeighStatus
+  // Por qué se apagó solo el pesaje automático (ej. lo tiene otro PC).
+  autoWeighNote: string | null
 }
 
 const SCHEDULE_CHECK_MS = 30_000
@@ -60,6 +63,9 @@ class CameraService extends EventEmitter {
   private config: CameraConfig | null = null
   private manualOn = false
   private autoWeighOn = false
+  // Pesos Bellavista de este PC confirmó que este PC tiene el turno.
+  private lockGranted = false
+  private autoWeighNote: string | null = null
   private scheduleTimer: NodeJS.Timeout | null = null
   private detectedAt: number | null = null
   private recognizer = new TruckRecognizer()
@@ -79,6 +85,8 @@ class CameraService extends EventEmitter {
 
   enableAutoWeigh(config: CameraConfig): void {
     this.autoWeighOn = true
+    this.lockGranted = false
+    this.autoWeighNote = null
     if (!this.scheduleTimer) {
       this.scheduleTimer = setInterval(() => this.reconcile(), SCHEDULE_CHECK_MS)
     }
@@ -92,6 +100,35 @@ class CameraService extends EventEmitter {
     this.useConfig(config)
     // Se recargan al activar, por si cambió algo en la carpeta de referencias.
     void this.loadReferences()
+    this.emit('auto-weigh-request')
+  }
+
+  wantsAutoWeigh(): boolean {
+    return this.autoWeighOn
+  }
+
+  // Respuesta de Pesos Bellavista: este PC tiene (o perdió) el turno.
+  setAutoWeighLock(granted: boolean): void {
+    if (!this.autoWeighOn || this.lockGranted === granted) return
+    this.lockGranted = granted
+    this.log({
+      type: 'info',
+      message: granted
+        ? 'Pesos Bellavista dio el turno: este PC hace el pesaje automático'
+        : 'Esperando el turno de Pesos Bellavista para el pesaje automático',
+      timestamp: Date.now()
+    })
+    this.emit('status', this.getStatus())
+  }
+
+  // Otro PC tiene el turno (o Pesos no lo permite): se apaga y queda el motivo.
+  autoWeighDenied(note: string): void {
+    if (!this.autoWeighOn) return
+    this.log({ type: 'error', message: note, timestamp: Date.now() })
+    this.disableAutoWeigh()
+    this.autoWeighNote = note
+    this.emit('auto-weigh-denied')
+    this.emit('status', this.getStatus())
   }
 
   // Las cargas van una detrás de otra: dos en paralelo mezclarían las fotos.
@@ -133,7 +170,7 @@ class CameraService extends EventEmitter {
   }
 
   private autoWeighActive(): boolean {
-    return this.autoWeighOn && isWithinActiveHours()
+    return this.autoWeighOn && this.lockGranted && isWithinActiveHours()
   }
 
   // Toma una foto nueva de la romana vacía si la que hay es vieja y no hay un
@@ -278,6 +315,9 @@ class CameraService extends EventEmitter {
 
   disableAutoWeigh(): void {
     this.autoWeighOn = false
+    this.lockGranted = false
+    this.autoWeighNote = null
+    this.emit('auto-weigh-release')
     if (this.scheduleTimer) {
       clearInterval(this.scheduleTimer)
       this.scheduleTimer = null
@@ -290,7 +330,14 @@ class CameraService extends EventEmitter {
     return {
       running: this.isRunning(),
       manual: this.manualOn,
-      autoWeigh: !this.autoWeighOn ? 'off' : isWithinActiveHours() ? 'active' : 'waiting'
+      autoWeigh: !this.autoWeighOn
+        ? 'off'
+        : !isWithinActiveHours()
+          ? 'waiting'
+          : this.lockGranted
+            ? 'active'
+            : 'no-lock',
+      autoWeighNote: this.autoWeighNote
     }
   }
 

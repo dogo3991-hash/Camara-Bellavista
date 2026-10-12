@@ -25,6 +25,7 @@ const COLORS: Record<CameraLogEntry['type'], string> = {
 const AUTO_WEIGH_LABELS: Record<AutoWeighStatus, { text: string; color: string }> = {
   active: { text: '● activo', color: '#16a34a' },
   waiting: { text: '◐ en espera (fuera de horario)', color: '#d97706' },
+  'no-lock': { text: '◐ esperando el turno de Pesos Bellavista', color: '#d97706' },
   off: { text: '○ apagado', color: '#999' }
 }
 
@@ -70,7 +71,8 @@ export function DetectionPanel({
       <p style={{ fontSize: 13, color: '#555', margin: '0 0 8px' }}>
         Reconoce el camión al detenerse en la romana y abre su pesaje pendiente en Pesos Bellavista.
         Funciona solo de 07:00 a 18:00 (hora del PC); fuera de ese horario se pausa y vuelve a
-        partir al día siguiente.
+        partir al día siguiente. Puede estar activo en un solo PC a la vez, y necesita Pesos
+        Bellavista abierto en este PC.
       </p>
       <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
         <button onClick={onEnableAutoWeigh} disabled={status.autoWeigh !== 'off'}>
@@ -83,6 +85,9 @@ export function DetectionPanel({
           {autoLabel.text}
         </span>
       </div>
+      {status.autoWeighNote && (
+        <p style={{ fontSize: 13, color: 'crimson', margin: '0 0 8px' }}>{status.autoWeighNote}</p>
+      )}
       <div
         style={{
           height: 220,
