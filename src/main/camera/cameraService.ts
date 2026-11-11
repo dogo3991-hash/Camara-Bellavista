@@ -103,6 +103,26 @@ class CameraService extends EventEmitter {
     this.emit('auto-weigh-request')
   }
 
+  // Pesos Bellavista activó su "Alerta por romana" (avisa por peso de la báscula):
+  // se apagan las dos detecciones para no tener dos alertas a la vez. El preview de
+  // la cámara no depende de esto y sigue funcionando.
+  stopAllForScaleAlert(): void {
+    if (!this.manualOn && !this.autoWeighOn) return
+    this.log({
+      type: 'info',
+      message: 'Detección apagada desde Pesos Bellavista (alerta por romana activa)',
+      timestamp: Date.now()
+    })
+    this.manualOn = false
+    if (this.autoWeighOn) {
+      this.disableAutoWeigh()
+      // Igual que el botón "Desactivar": no debe reanudarse al reiniciar la app.
+      this.emit('auto-weigh-turned-off')
+    } else {
+      this.reconcile()
+    }
+  }
+
   wantsAutoWeigh(): boolean {
     return this.autoWeighOn
   }

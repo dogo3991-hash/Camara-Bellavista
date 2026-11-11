@@ -59,6 +59,8 @@ export function startWsServer(onPreviewFrame?: (base64Jpeg: string) => void): vo
           cameraService.setAutoWeighLock(false)
         } else if (message?.type === 'auto-weigh-denied') {
           cameraService.autoWeighDenied(denialNote(message))
+        } else if (message?.type === 'stop-camera-detection') {
+          cameraService.stopAllForScaleAlert()
         }
       } catch {
         // Mensaje malformado: se ignora.
@@ -84,6 +86,11 @@ export function startWsServer(onPreviewFrame?: (base64Jpeg: string) => void): vo
   cameraService.on('auto-weigh-release', () => {
     lockSocket = null
     broadcast({ type: 'auto-weigh-release' })
+  })
+
+  // El usuario prendió una detección de la cámara: Pesos apaga su alerta por romana.
+  cameraService.on('user-started-detection', () => {
+    broadcast({ type: 'camera-detection-started' })
   })
 
   cameraService.on('truck-detected', () => {

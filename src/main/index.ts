@@ -135,6 +135,8 @@ function registerCameraIpc(): void {
 
   ipcMain.handle('camera:start-detection', (_event, config: CameraConfig) => {
     cameraService.startDetection(config)
+    // Solo las acciones del usuario avisan a Pesos Bellavista (apaga su alerta por romana).
+    cameraService.emit('user-started-detection')
     return cameraService.getStatus()
   })
 
@@ -149,6 +151,7 @@ function registerCameraIpc(): void {
     const merged = { ...config, autoWeigh: true }
     saveConfig(merged)
     cameraService.enableAutoWeigh(merged)
+    cameraService.emit('user-started-detection')
     return cameraService.getStatus()
   })
 
@@ -196,6 +199,11 @@ function registerCameraIpc(): void {
 
   // Otro PC tiene el turno: queda apagado también al reiniciar la app.
   cameraService.on('auto-weigh-denied', () => {
+    saveConfig({ ...loadConfig(), autoWeigh: false })
+  })
+
+  // Lo apagó Pesos Bellavista (alerta por romana): tampoco se reanuda al reiniciar.
+  cameraService.on('auto-weigh-turned-off', () => {
     saveConfig({ ...loadConfig(), autoWeigh: false })
   })
 
